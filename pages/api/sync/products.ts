@@ -1,4 +1,8 @@
 // pages/api/sync/products.ts
+// This file is currently disabled
+
+export {};
+
 /*  import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSession, bigcommerceClient } from '../../../lib/auth';
 import db from '../../../lib/db'; // Assuming you export query from here

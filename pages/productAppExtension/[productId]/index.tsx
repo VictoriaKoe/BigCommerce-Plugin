@@ -12,7 +12,7 @@ import {
 } from '@bigcommerce/big-design';
 import { CloseIcon } from '@bigcommerce/big-design-icons';
 import { useRouter } from 'next/router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Select from 'react-select';
 import ErrorMessage from '@components/error';
 import Loading from '@components/loading';
@@ -21,6 +21,7 @@ import { useProductInfo, useProductList } from '@lib/hooks';
 const ProductAppExtension = () => {
   const router = useRouter();
   const productId = Number(router.query?.productId);
+  const context = router.query?.context as string;
 
   const { error, isLoading, product } = useProductInfo(productId);
   const { name } = product ?? {};
@@ -33,26 +34,28 @@ const ProductAppExtension = () => {
   const [selectedItem, setSelectedItem] = useState(null);
 
   // Format available products for react-select (main products only)
-  const products = list
-    .filter(({ id, sku }) => {
-      // Exclude current product
-      if (id === productId) return false;
-      // Exclude products that are bundles (have BUN- prefix)
-      if (sku?.startsWith('BUN-')) return false;
+  const products = useMemo(() => {
+    return list
+      .filter(({ id, sku }) => {
+        // Exclude current product
+        if (id === productId) return false;
+        // Exclude products that are bundles (have BUN- prefix)
+        if (sku?.startsWith('BUN-')) return false;
 
-      return true;
-    })
-    .map(({ id, sku, name, price, inventory_level, variants, inventory_tracking }) => {
-      return {
-        value: id,
-        label: name,
-        sku,
-        variants: variants || [],
-        price,
-        inventory_level,
-        inventory_tracking
-      };
-    });
+        return true;
+      })
+      .map(({ id, sku, name, price, inventory_level, variants, inventory_tracking }) => {
+        return {
+          value: id,
+          label: name,
+          sku,
+          variants: variants || [],
+          price,
+          inventory_level,
+          inventory_tracking
+        };
+      });
+  }, [list, productId]);
 
   // Create combined options for products and their SKUs
   const combinedOptions = products.reduce((acc, product) => {
@@ -137,7 +140,7 @@ const ProductAppExtension = () => {
       if (!productId || products.length === 0) return;
 
       try {
-        const res = await fetch(`/api/productAppExtension/${productId}/metafields`);
+        const res = await fetch(`/api/productAppExtension/${productId}/metafields?context=${encodeURIComponent(context)}`);
         const data = await res.json();
 
         if (res.ok) {
@@ -169,7 +172,8 @@ const ProductAppExtension = () => {
     }
 
     fetchMetafields();
-  }, [productId, products, products.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productId, products]);
 
   const handleQuantityChange = (productId, quantity) => {
     setProductQuantities(prev => ({
@@ -186,7 +190,7 @@ const ProductAppExtension = () => {
       const isActuallyBundle = isBundle && linkedProducts.length > 0;
 
       // Save metafields with quantities
-      const metafieldsRes = await fetch(`/api/productAppExtension/${productId}/metafields`, {
+      const metafieldsRes = await fetch(`/api/productAppExtension/${productId}/metafields?context=${encodeURIComponent(context)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -224,7 +228,7 @@ const ProductAppExtension = () => {
         // Fetch current stock levels from BigCommerce API
         const stockLevels = await Promise.all(
           linkedProducts.map(async (p) => {
-            const res = await fetch(`/api/products/${p.value}`);
+            const res = await fetch(`/api/products/${p.value}?context=${encodeURIComponent(context)}`);
             if (!res.ok) {
               console.warn(`Failed to fetch stock for product ${p.value}`);
 
@@ -250,7 +254,7 @@ const ProductAppExtension = () => {
       console.log("Updating with data:", updateData);
 
       // Make API call to update product
-      const updateProductRes = await fetch(`/api/products/${productId}`, {
+      const updateProductRes = await fetch(`/api/products/${productId}?context=${encodeURIComponent(context)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updateData),

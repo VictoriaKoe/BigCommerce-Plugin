@@ -4,7 +4,7 @@ import * as BigCommerce from 'node-bigcommerce';
 import { ApiConfig, QueryParams, SessionContextProps, SessionProps } from '../types';
 import db from './db';
 
-const { API_URL, AUTH_CALLBACK, CLIENT_ID, CLIENT_SECRET, JWT_KEY, LOGIN_URL } = process.env;
+const { API_URL, APP_URL, CLIENT_ID, CLIENT_SECRET, JWT_KEY, LOGIN_URL } = process.env;
 
 // Used for internal configuration; 3rd party apps may remove
 const apiConfig: ApiConfig = {};
@@ -19,7 +19,7 @@ const bigcommerce = new BigCommerce({
     logLevel: 'info',
     clientId: CLIENT_ID,
     secret: CLIENT_SECRET,
-    callback: AUTH_CALLBACK,
+    callback: `${APP_URL}/api/auth`,
     responseType: 'json',
     headers: { 'Accept-Encoding': '*' },
     apiVersion: 'v3',
@@ -59,13 +59,13 @@ export function setSession(session: SessionProps) {
 
 export async function getSession(req: NextApiRequest) {
     // ✅ Local dev fallback — bypass JWT check
-    if (process.env.NODE_ENV === 'development') {
-        return {
-            accessToken: process.env.ACCESS_TOKEN,
-            storeHash: process.env.STORE_HASH,
-            user: { id: 1, email: 'dev@localhost', username: 'dev' }, // optional dummy user
-        };
-    }
+    // if (process.env.NODE_ENV === 'development') {
+    //     return {
+    //         accessToken: process.env.ACCESS_TOKEN,
+    //         storeHash: process.env.STORE_HASH,
+    //         user: { id: 1, email: 'dev@localhost', username: 'dev' }, // optional dummy user
+    //     };
+    // }
 
     const encodedContext = req.query?.context;
     if (typeof encodedContext !== 'string') {

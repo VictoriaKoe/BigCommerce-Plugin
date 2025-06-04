@@ -132,7 +132,6 @@ import {
               options={skuOptions}
               value={selectedSKU}
               onOptionChange={setSelectedSKU}
-              placeholder="Search and select SKU"
             />
           </FlexItem>
           <Button
