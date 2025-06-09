@@ -23,6 +23,7 @@
     "@bigcommerce/big-design": "^0.36.0",
     "@bigcommerce/big-design-icons": "^0.23.0",
     "@bigcommerce/big-design-theme": "^0.19.0",
+    "@neondatabase/serverless": "^0.9.5",
     "axios": "^1.9.0",
     "dotenv": "^16.0.3",
     "firebase": "^9.14.0",

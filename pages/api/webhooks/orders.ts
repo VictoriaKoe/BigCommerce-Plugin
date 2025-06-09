@@ -1,6 +1,7 @@
 /* eslint-disable no-console */
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { bigcommerceClient } from '../../../lib/auth';
+import db from '../../../lib/db';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end('Method Not Allowed');
@@ -9,13 +10,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     console.log('✅ Webhook received:', JSON.stringify(req.body, null, 2));
 
     const order = req.body.data;
-    const storeHash = process.env.STORE_HASH;
-    const accessToken = process.env.ACCESS_TOKEN;
+    const storeHash = req.body.store_id; // BigCommerce sends store_id in webhook payload
 
-    if (!order || !storeHash || !accessToken) {
-      console.error('❌ Missing order, storeHash, or accessToken');
+    if (!order || !storeHash) {
+      console.error('❌ Missing order or storeHash in webhook payload');
 
       return res.status(400).json({ message: 'Missing required information' });
+    }
+
+    // Get the access token for this store from the database
+    const accessToken = await db.getStoreToken(storeHash);
+
+    if (!accessToken) {
+      console.error(`❌ No access token found for store ${storeHash}`);
+
+      return res.status(401).json({ message: 'Store not authorized' });
     }
 
     const bc = bigcommerceClient(accessToken, storeHash);
@@ -134,4 +143,3 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(500).json({ message: 'Internal Server Error' });
   }
 }
-

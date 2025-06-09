@@ -100,7 +100,6 @@ const SimulateSale = ({ products }) => {
               options={products}
               value={products.find(p => p.value === selectedProduct)}
               onOptionChange={(selected) => setSelectedProduct(selected?.value)}
-              placeholder="Choose a product..."
             />
             <Small>
               {selectedProduct && products.find(p => p.value === selectedProduct)?.isBundle

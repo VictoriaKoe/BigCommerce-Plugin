@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useSession } from '../../context/session';
 
 interface BundleProduct {
   id: number;
@@ -11,13 +12,15 @@ export const useBundles = () => {
   const [bundles, setBundles] = useState<BundleProduct[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const { context } = useSession();
 
-  const fetchBundles = async () => {
+  const fetchBundles = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
     try {
-      const response = await fetch('/api/bundles');
+      const url = context ? `/api/bundles?context=${encodeURIComponent(context)}` : '/api/bundles';
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error('Failed to fetch bundles');
       }
@@ -28,11 +31,13 @@ export const useBundles = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [context]);
 
   useEffect(() => {
-    fetchBundles();
-  }, []);
+    if (context) {
+      fetchBundles();
+    }
+  }, [context, fetchBundles]);
 
   return { bundles, isLoading, error, refetch: fetchBundles };
-}; 
+};

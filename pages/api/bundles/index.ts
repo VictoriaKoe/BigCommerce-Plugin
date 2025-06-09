@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { bigcommerceClient } from '../../../lib/auth';
+import { bigcommerceClient, getSession } from '../../../lib/auth';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') {
@@ -7,10 +7,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    if (!process.env.ACCESS_TOKEN || !process.env.STORE_HASH) {
-      throw new Error('Missing required environment variables: ACCESS_TOKEN or STORE_HASH');
+    // Get session from the authenticated user
+    const { accessToken, storeHash } = await getSession(req);
+    
+    if (!accessToken || !storeHash) {
+      return res.status(401).json({ message: 'Unauthorized - missing session data' });
     }
-    const bc = bigcommerceClient(process.env.ACCESS_TOKEN, process.env.STORE_HASH);
+    
+    const bc = bigcommerceClient(accessToken, storeHash);
 
     // Get all products
     const { data: products } = await bc.get('/catalog/products');
@@ -46,4 +50,4 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     console.error('Error fetching bundles:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
-} 
+}

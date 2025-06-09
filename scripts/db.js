@@ -1,106 +1,121 @@
-const mysql = require('mysql2');
-const util = require('util');
+const { neon } = require('@neondatabase/serverless');
 const axios = require('axios');
 require('dotenv').config();
 
-// Set up MySQL connection
-const MYSQL_CONFIG = {
-  host: process.env.MYSQL_HOST,
-  database: process.env.MYSQL_DATABASE,
-  user: process.env.MYSQL_USERNAME,
-  password: process.env.MYSQL_PASSWORD,
-  ...(process.env.MYSQL_PORT && { port: process.env.MYSQL_PORT }),
-};
+// Neon serverless connection
+const sql = neon(process.env.POSTGRES_URL);
 
-const connection = mysql.createConnection(process.env.DATABASE_URL ? process.env.DATABASE_URL : MYSQL_CONFIG);
-const query = util.promisify(connection.query.bind(connection));
+// Function to get store credentials from database
+async function getStoreCredentials() {
+  try {
+    // Get the first store from the database (for single-store setups)
+    // For multi-store, you could pass a specific store hash as a parameter
+    const stores = await sql`SELECT store_hash, access_token FROM stores LIMIT 1`;
+    
+    if (stores.length === 0) {
+      throw new Error('No stores found in database. Please install the app on a store first.');
+    }
+    
+    const { store_hash, access_token } = stores[0];
+    
+    if (!access_token) {
+      throw new Error('No access token found for store. Please reinstall the app.');
+    }
+    
+    return { storeHash: store_hash, accessToken: access_token };
+  } catch (error) {
+    console.error('[DB] ❌ Error getting store credentials:', error.message);
+    throw error;
+  }
+}
 
-// Set up BigCommerce API client
-const bigcommerce = axios.create({
-  baseURL: `https://api.bigcommerce.com/stores/${process.env.STORE_HASH}/v3`,
-  headers: {
-    'X-Auth-Token': process.env.ACCESS_TOKEN,
-    'Accept': 'application/json',
-    'Content-Type': 'application/json',
-  },
-});
+// Function to create BigCommerce API client
+function createBigCommerceClient(storeHash, accessToken) {
+  return axios.create({
+    baseURL: `https://api.bigcommerce.com/stores/${storeHash}/v3`,
+    headers: {
+      'X-Auth-Token': accessToken,
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+    },
+  });
+}
 
 async function createTables() {
+  console.log('[DB] 🔄 Creating PostgreSQL tables...');
+  
   // Create users table
-  await query(`
+  await sql`
     CREATE TABLE IF NOT EXISTS users (
-      id INT(11) UNSIGNED NOT NULL AUTO_INCREMENT,
-      userId INT(11) NOT NULL,
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL UNIQUE,
       email TEXT NOT NULL,
-      username TEXT,
-      PRIMARY KEY (id),
-      UNIQUE KEY userId (userId)
-    ) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8;
-  `);
+      username TEXT
+    );
+  `;
 
   // Create stores table
-  await query(`
+  await sql`
     CREATE TABLE IF NOT EXISTS stores (
-      id INT(11) UNSIGNED NOT NULL AUTO_INCREMENT,
-      storeHash VARCHAR(10) NOT NULL,
-      accessToken TEXT,
-      scope TEXT,
-      PRIMARY KEY (id),
-      UNIQUE KEY storeHash (storeHash)
-    ) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8;
-  `);
+      id SERIAL PRIMARY KEY,
+      store_hash VARCHAR(10) NOT NULL UNIQUE,
+      access_token TEXT,
+      scope TEXT
+    );
+  `;
 
-  // Create storeUsers table
-  await query(`
-    CREATE TABLE IF NOT EXISTS storeUsers (
-      id INT(11) UNSIGNED NOT NULL AUTO_INCREMENT,
-      userId INT(11) NOT NULL,
-      storeHash VARCHAR(10) NOT NULL,
-      isAdmin BOOLEAN,
-      PRIMARY KEY (id),
-      UNIQUE KEY userId (userId, storeHash)
-    ) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8;
-  `);
+  // Create store_users table
+  await sql`
+    CREATE TABLE IF NOT EXISTS store_users (
+      id SERIAL PRIMARY KEY,
+      user_id VARCHAR(50) NOT NULL,
+      store_hash VARCHAR(10) NOT NULL,
+      is_admin BOOLEAN DEFAULT FALSE,
+      UNIQUE(user_id, store_hash)
+    );
+  `;
 
   // Create products table
-  await query(`
+  await sql`
     CREATE TABLE IF NOT EXISTS products (
-      id INT AUTO_INCREMENT PRIMARY KEY,
+      id SERIAL PRIMARY KEY,
       sku VARCHAR(100) NOT NULL UNIQUE,
       name VARCHAR(255) NOT NULL,
-      stock INT NOT NULL,
+      stock INTEGER NOT NULL,
       price DECIMAL(10,2) NOT NULL
     );
-  `);
+  `;
 
   // Create bundles table
-  await query(`
+  await sql`
     CREATE TABLE IF NOT EXISTS bundles (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      name VARCHAR(255) NOT NULL,
-      price DECIMAL(10,2) NOT NULL DEFAULT 0
+      id SERIAL PRIMARY KEY,
+      product_id INTEGER NOT NULL UNIQUE,
+      is_bundle BOOLEAN NOT NULL DEFAULT FALSE
     );
-  `);
+  `;
 
-  // Create bundle_items table
-  await query(`
-    CREATE TABLE IF NOT EXISTS bundle_items (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      bundle_id INT NOT NULL,
-      product_id INT NOT NULL,
-      quantity INT NOT NULL,
-      FOREIGN KEY (bundle_id) REFERENCES bundles(id) ON DELETE CASCADE,
-      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+  // Create bundle_links table
+  await sql`
+    CREATE TABLE IF NOT EXISTS bundle_links (
+      id SERIAL PRIMARY KEY,
+      bundle_id INTEGER NOT NULL,
+      product_id INTEGER NOT NULL,
+      FOREIGN KEY (bundle_id) REFERENCES bundles(product_id) ON DELETE CASCADE
     );
-  `);
+  `;
 
-  console.log('[DB] ✅ Tables created or already exist.');
+  console.log('[DB] ✅ PostgreSQL tables created or already exist.');
 }
 
 async function syncProductsFromBigCommerce() {
   console.log('[DB] 🔄 Syncing products from BigCommerce...');
 
   try {
+    // Get store credentials from database
+    const { storeHash, accessToken } = await getStoreCredentials();
+    const bigcommerce = createBigCommerceClient(storeHash, accessToken);
+    
     const { data } = await bigcommerce.get('/catalog/products?limit=250');
 
     for (const p of data.data) {
@@ -111,29 +126,33 @@ async function syncProductsFromBigCommerce() {
       const stock = p.inventory_level || 0;
       const price = p.price || 0.00;
 
-      await query(`
+      await sql`
         INSERT INTO products (sku, name, stock, price)
-        VALUES (?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE
-          name = VALUES(name),
-          stock = VALUES(stock),
-          price = VALUES(price);
-      `, [sku, name, stock, price]);
+        VALUES (${sku}, ${name}, ${stock}, ${price})
+        ON CONFLICT (sku) 
+        DO UPDATE SET
+          name = EXCLUDED.name,
+          stock = EXCLUDED.stock,
+          price = EXCLUDED.price;
+      `;
     }
 
     console.log(`[DB] ✅ Synced ${data.data.length} products from BigCommerce.`);
-} catch (error) {
-    console.error('[DB] ❌ Error syncing products:', error.response?.data || error.message);
+  } catch (error) {
+    if (error.message.includes('No stores found')) {
+      console.log('[DB] ℹ️  No stores found in database yet. Product sync will be skipped.');
+      console.log('[DB] ℹ️  Install the app on a store first, then run this script again to sync products.');
+    } else {
+      console.error('[DB] ❌ Error syncing products:', error.response?.data || error.message);
+    }
   }  
 }
 
 (async () => {
   try {
     await createTables();
-    await syncProductsFromBigCommerce(); // 👈 now also syncing
+    await syncProductsFromBigCommerce();
   } catch (err) {
     console.error('[DB] ❌ Error:', err.message);
-  } finally {
-    connection.end();
   }
 })();

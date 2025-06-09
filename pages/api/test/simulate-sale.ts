@@ -1,6 +1,6 @@
 /* eslint-disable no-console */
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { bigcommerceClient } from '../../../lib/auth';
+import { bigcommerceClient, getSession } from '../../../lib/auth';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -14,11 +14,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ message: 'productId is required' });
     }
 
-    const storeHash = process.env.STORE_HASH;
-    const accessToken = process.env.ACCESS_TOKEN;
-
-    if (!storeHash || !accessToken) {
-      return res.status(500).json({ message: 'Missing store configuration' });
+    // Get session from the authenticated user
+    const { accessToken, storeHash } = await getSession(req);
+    
+    if (!accessToken || !storeHash) {
+      return res.status(401).json({ message: 'Unauthorized - missing session data' });
     }
 
     const bc = bigcommerceClient(accessToken, storeHash);
@@ -153,4 +153,4 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     console.error('Error simulating sale:', error);
     res.status(500).json({ message: 'Error simulating sale', error: error.message });
   }
-} 
+}
