@@ -13,7 +13,7 @@
     "db:setup": "node scripts/db.js",
     "db:start": "docker compose up -d",
     "db:stop": "docker compose down",
-    "create-webhook": "node create-webhook.js"
+    "create-webhook": "node scripts/create-webhook.js"
   },
   "keywords": [],
   "author": "",

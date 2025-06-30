@@ -83,42 +83,59 @@ npm run dev
 
 11. Consult our developer documentation to [install and launch the app](https://developer.bigcommerce.com/api-docs/apps/quick-start#install-the-app).
 
-## Registering Webhooks
+## Webhook Management
 
-There are two ways to register webhooks for your app:
+This app automatically manages webhooks for BigCommerce stores. Webhooks are essential for real-time inventory management when bundle products are purchased.
 
-### Manual Registration
+### Automatic Webhook Registration
 
-1. In your BigCommerce store's admin panel, go to **Settings** > **API** > **Webhooks**.
+The app automatically creates and manages webhooks during the app lifecycle:
 
-2. Click **Create a Webhook**.
+1. **During App Installation** (`/api/auth`): Creates webhooks for new store installations
+2. **During App Loading** (`/api/load`): Ensures webhooks exist for existing installations (safety check)
+3. **During App Uninstall** (`/api/uninstall`): Cleans up webhooks when the app is removed
 
-3. Configure the webhook with the following settings:
-   - **Event**: Select the event you want to listen to (e.g., `store/product/*`)
-   - **Destination**: Enter your app's webhook endpoint URL: `https://{your-domain}/api/webhooks`
-   - **Version**: Select the API version you want to use
-   - **Format**: JSON
+### Webhook Configuration
 
-4. Click **Save** to register the webhook.
+The app registers the following webhook:
+- **Event**: `store/order/created`
+- **Destination**: `{APP_URL}/api/webhooks/orders`
+- **Purpose**: Updates inventory levels for bundle products when orders are placed
 
-### Programmatic Registration
+### Manual Testing
 
-You can register webhooks programmatically using the provided script. Follow these steps:
+For development and testing purposes, you can use the provided scripts:
 
-1. Make sure your app is installed and running.
-
-2. Run the webhook registration script:
-
+#### Test Webhook Management
 ```shell
-npm run register-webhooks
+node scripts/test-webhook.js
 ```
 
 This script will:
-- Register the necessary webhook endpoints
-- Configure the webhook settings automatically
-- Set up proper authentication and validation
+- List existing webhooks for your store
+- Test the webhook creation process
+- Verify webhook configuration
 
-> Note: Make sure your app's webhook endpoint is publicly accessible and properly configured to handle incoming webhook requests. The webhook endpoint should be secured and validate the webhook signature to ensure the requests are coming from BigCommerce.
+#### Legacy Manual Creation (Development Only)
+```shell
+node scripts/create-webhook.js
+```
+
+> **Note**: The manual script is only needed for local development. In production, webhooks are automatically managed by the app.
+
+### Webhook Lifecycle
+
+- **Creation**: Webhooks are automatically created when a store installs the app
+- **Validation**: Each app load checks if webhooks exist and recreates them if missing
+- **Cleanup**: Webhooks are automatically removed when the app is uninstalled
+- **Resilience**: Webhook creation failures don't prevent app installation (logged for debugging)
+
+### BigCommerce Webhook Behavior
+
+- Webhooks remain active as long as the store is active
+- Webhooks are automatically disabled after 90 days of store inactivity
+- The app's safety checks ensure webhooks are recreated if they become missing
+- No token refresh is needed for webhooks (they use the destination URL)
 
 ## Production builds
 

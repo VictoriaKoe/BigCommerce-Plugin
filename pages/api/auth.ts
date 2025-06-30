@@ -1,6 +1,7 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import { createAppExtension } from '@lib/appExtensions';
 import { encodePayload, getBCAuth, setSession } from '../../lib/auth';
+import { ensureWebhookExists } from '../../lib/webhooks';
 
 export default async function auth(req: NextApiRequest, res: NextApiResponse) {
     const isAppExtensionsScopeEnabled = req.query.scope.includes('store_app_extensions_manage');
@@ -26,6 +27,14 @@ export default async function auth(req: NextApiRequest, res: NextApiResponse) {
             await createAppExtension({ accessToken, storeHash })
         } else {
             console.warn("WARNING: App extensions scope is not enabled yet. To register app extensions update the scope in Developer Portal: https://devtools.bigcommerce.com");
+        }
+
+        // Create webhook for order events
+        try {
+            await ensureWebhookExists({ accessToken, storeHash });
+        } catch (webhookError) {
+            // Log webhook creation error but don't fail the installation
+            console.error('Failed to create webhook during installation:', webhookError);
         }
 
         res.redirect(302, `/?context=${encodedContext}`);

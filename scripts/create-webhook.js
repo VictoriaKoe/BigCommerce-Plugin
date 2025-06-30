@@ -1,31 +1,7 @@
 /* eslint-disable no-console */
 import 'dotenv/config';
 import axios from 'axios';
-import { sql } from './lib/database.js';
-
-// Function to get store credentials from database
-async function getStoreCredentials() {
-  try {
-    // Get the first store from the database (for single-store setups)
-    // For multi-store, you could pass a specific store hash as a parameter
-    const stores = await sql`SELECT store_hash, access_token FROM stores LIMIT 1`;
-
-    if (stores.length === 0) {
-      throw new Error('No stores found in database. Please install the app on a store first.');
-    }
-
-    const { store_hash, access_token } = stores[0];
-
-    if (!access_token) {
-      throw new Error('No access token found for store. Please reinstall the app.');
-    }
-
-    return { storeHash: store_hash, accessToken: access_token };
-  } catch (error) {
-    console.error('❌ Error getting store credentials:', error.message);
-    throw error;
-  }
-}
+import { getStoreCredentials } from './db.js';
 
 async function createWebhook() {
   const appUrl = process.env.APP_URL;

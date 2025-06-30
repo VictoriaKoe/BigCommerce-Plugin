@@ -1,5 +1,5 @@
-const { bigcommerceClient } = require('../lib/auth');
-const { getStoreCredentials } = require('./db.js');
+import { bigcommerceClient } from '../lib/auth';
+import { getStoreCredentials } from './db.js';
 
 async function initBundleCustomField() {
   try {

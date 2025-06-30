@@ -2,6 +2,7 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import { createAppExtension, getAppExtensions } from '@lib/appExtensions';
 import db from '@lib/db';
 import { encodePayload, getBCVerify, setSession } from '../../lib/auth';
+import { ensureWebhookExists } from '../../lib/webhooks';
 
 const buildRedirectUrl = (url: string, encodedContext: string) => {
     const [path, query = ''] = url.split('?');
@@ -61,6 +62,14 @@ export default async function load(req: NextApiRequest, res: NextApiResponse) {
         
         if (!existingAppExtensionIds?.length) {
           await createAppExtension({ accessToken, storeHash });
+        }
+
+        // Ensure webhook exists for order events (safety check for existing installations)
+        try {
+            await ensureWebhookExists({ accessToken, storeHash });
+        } catch (webhookError) {
+            // Log webhook creation error but don't fail the app load
+            console.error('Failed to ensure webhook exists during app load:', webhookError);
         }
 
         res.redirect(302, buildRedirectUrl(session.url, encodedContext));

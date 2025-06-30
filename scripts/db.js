@@ -8,17 +8,17 @@ async function getStoreCredentials() {
     // Get the first store from the database (for single-store setups)
     // For multi-store, you could pass a specific store hash as a parameter
     const stores = await sql`SELECT store_hash, access_token FROM stores LIMIT 1`;
-    
+
     if (stores.length === 0) {
       throw new Error('No stores found in database. Please install the app on a store first.');
     }
-    
+
     const { store_hash, access_token } = stores[0];
-    
+
     if (!access_token) {
       throw new Error('No access token found for store. Please reinstall the app.');
     }
-    
+
     return { storeHash: store_hash, accessToken: access_token };
   } catch (error) {
     console.error('[DB] ❌ Error getting store credentials:', error.message);
@@ -40,7 +40,7 @@ function createBigCommerceClient(storeHash, accessToken) {
 
 async function createTables() {
   console.log('[DB] 🔄 Creating PostgreSQL tables...');
-  
+
   // Create users table
   await sql`
     CREATE TABLE IF NOT EXISTS users (
@@ -112,7 +112,7 @@ async function syncProductsFromBigCommerce() {
     // Get store credentials from database
     const { storeHash, accessToken } = await getStoreCredentials();
     const bigcommerce = createBigCommerceClient(storeHash, accessToken);
-    
+
     const { data } = await bigcommerce.get('/catalog/products?limit=250');
 
     for (const p of data.data) {
@@ -142,7 +142,7 @@ async function syncProductsFromBigCommerce() {
     } else {
       console.error('[DB] ❌ Error syncing products:', error.response?.data || error.message);
     }
-  }  
+  }
 }
 
 // Export the function for use in other scripts
