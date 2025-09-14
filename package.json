@@ -9,6 +9,8 @@
     "build": "next build",
     "start": "next start -p $PORT",
     "test": "jest --updateSnapshot",
+    "test:e2e": "playwright test --headed",
+    "test:e2e:headless": "playwright test --headed=false",
     "lint": "eslint . --fix --ext .ts,.tsx,.js",
     "db:setup": "node scripts/db.js",
     "db:start": "docker compose up -d",
@@ -42,6 +44,7 @@
     "ws": "^8.18.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.54.2",
     "@testing-library/dom": "^8.20.1",
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^14.3.1",

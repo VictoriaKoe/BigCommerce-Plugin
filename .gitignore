@@ -98,6 +98,11 @@ dist
 .fusebox/
 
 # DynamoDB Local files
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
 .dynamodb/
 
 # TernJS port file
