@@ -102,6 +102,36 @@ async function createTables() {
     );
   `;
 
+  // Create order_history table for tracking order changes
+  await sql`
+    CREATE TABLE IF NOT EXISTS order_history (
+      id SERIAL PRIMARY KEY,
+      order_id INTEGER NOT NULL,
+      store_hash VARCHAR(10) NOT NULL,
+      order_items JSONB NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(order_id, store_hash)
+    );
+  `;
+
+  // Create webhook_processed table for deduplication
+  await sql`
+    CREATE TABLE IF NOT EXISTS webhook_processed (
+      id SERIAL PRIMARY KEY,
+      webhook_id VARCHAR(255) NOT NULL UNIQUE,
+      order_id INTEGER NOT NULL,
+      store_hash VARCHAR(10) NOT NULL,
+      processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      expires_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP + INTERVAL '1 hour')
+    );
+  `;
+
+  // Create index for cleanup performance
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_webhook_processed_expires 
+    ON webhook_processed(expires_at);
+  `;
+
   console.log('[DB] ✅ PostgreSQL tables created or already exist.');
 }
 
@@ -151,7 +181,11 @@ export { getStoreCredentials };
 (async () => {
   try {
     await createTables();
-    await syncProductsFromBigCommerce();
+    
+    // Only sync products if explicitly running db:setup (not during builds)
+    if (process.env.SKIP_PRODUCT_SYNC !== 'true') {
+      await syncProductsFromBigCommerce();
+    }
   } catch (err) {
     console.error('[DB] ❌ Error:', err.message);
   }

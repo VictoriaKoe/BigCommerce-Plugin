@@ -5,6 +5,10 @@ import {
   recalculateVariantBundles 
 } from '../../../lib/bundle-calculator';
 import db from '../../../lib/db';
+import { 
+  checkWebhookDuplicate,
+  cleanupExpiredWebhooks 
+} from '../../../lib/webhook-deduplication';
 
 // Utility to get bundle info for a product
 async function getProductBundleInfo(productId: number, bc: any) {
@@ -76,7 +80,7 @@ return;
         id: product.id,
         linkedProductIds: productLinkedProductIds
       });
-      console.log(`[Product Update] Found product bundle: ${product.id} with ${productLinkedProductIds.length} linked products`);
+      //console.log(`[Product Update] Found product bundle: ${product.id} with ${productLinkedProductIds.length} linked products`);
     }
 
     // Check variant-level metafields
@@ -90,12 +94,12 @@ return;
           variantId: variant.id,
           linkedProductIds: variantLinkedProductIds
         });
-        console.log(`[Product Update] Found variant bundle: ${product.id}:${variant.id} with ${variantLinkedProductIds.length} linked products`);
+        //console.log(`[Product Update] Found variant bundle: ${product.id}:${variant.id} with ${variantLinkedProductIds.length} linked products`);
       }
     }
   }
   
-  console.log(`[Product Update] Total bundles found: ${productBundles.length} product bundles, ${variantBundles.length} variant bundles`);
+  //console.log(`[Product Update] Total bundles found: ${productBundles.length} product bundles, ${variantBundles.length} variant bundles`);
 
   // Find all bundles affected by the updated product (including its variants)
   const affectedProductBundles = [];
@@ -175,6 +179,7 @@ return res.status(200).json({ message: 'Skipped app-generated update' });
 
     const product = req.body.data;
     const scope = req.body.scope;
+    const timestamp = req.body.created_at || Math.floor(Date.now() / 1000);
     
     // Extract store hash from producer field (format: "stores/7wt5mizwwn")
     const storeHash = req.body.producer?.split('/')[1];
@@ -183,8 +188,19 @@ return res.status(200).json({ message: 'Skipped app-generated update' });
       return res.status(400).json({ message: 'Missing required information' });
     }
 
-    console.log(`[Product Update] Received ${scope} webhook for product ${product.id} in store ${storeHash}`);
-    console.log(`[Product Update] Webhook payload:`, JSON.stringify(product, null, 2));
+    const productId = product.id;
+
+    // Check for duplicate webhook before any processing (atomically registers if new)
+    const { isDuplicate, webhookId } = await checkWebhookDuplicate(productId, storeHash, timestamp, scope);
+    
+    if (isDuplicate) {
+      console.log(`[Product Update] Duplicate webhook detected for product ${productId}, skipping processing`);
+      
+return res.status(200).json({ message: 'Duplicate webhook ignored', webhookId });
+    }
+    
+    // Webhook is now registered atomically - safe to process
+    console.log(`[Product Update] Processing webhook ${webhookId} for product ${productId}`);
 
 
     // Get the access token for this store from the database
@@ -204,7 +220,12 @@ return res.status(200).json({ message: 'Skipped app-generated update' });
       await updateAffectedBundlesOptimized(product.id, bc, storeHash, accessToken);
     }
 
-    res.status(200).json({ message: 'Bundle inventory updated successfully' });
+    // Cleanup old webhook records periodically (1% chance per webhook)
+    if (Math.random() < 0.01) {
+      cleanupExpiredWebhooks(); // Don't await - run in background
+    }
+
+    res.status(200).json({ message: 'Bundle inventory updated successfully', webhookId });
   } catch (err: any) {
     console.error('[Product Update] Error:', err);
     res.status(500).json({ message: 'Internal Server Error', error: err.message });

@@ -98,3 +98,18 @@ export const useShippingAndProductsInfo = (orderId: number) => {
         error,
     };
 }
+
+export function useAllProducts() {
+    const { context } = useSession();
+    const params = new URLSearchParams({ context }).toString();
+
+    const { data, error, mutate } = useSWR(context ? ['/api/products/all', params] : null, fetcher);
+
+    return {
+        list: data?.data,
+        meta: data?.meta,
+        isLoading: !data && !error,
+        error,
+        mutate,
+    };
+}

@@ -5,6 +5,15 @@ import {
   recalculateBundlesFromKeys 
 } from '../../../lib/bundle-calculator';
 import db from '../../../lib/db';
+import { 
+  calculateOrderDeltas, 
+  getOrderHistory, 
+  storeOrderHistory 
+} from '../../../lib/order-history';
+import { 
+  checkWebhookDuplicate,
+  cleanupExpiredWebhooks 
+} from '../../../lib/webhook-deduplication';
 
 // Utility to get bundle info for a product
 async function getProductBundleInfo(productId: number, bc: any) {
@@ -29,7 +38,7 @@ async function getVariantBundleInfo(productId: number, variantId: number, bc: an
 // parseLinkedProduct function moved to lib/bundle-calculator.ts
 
 // Check if order is newly created by comparing date_created and date_modified
-async function checkIfNewOrder(orderId: number, storeHash: string, accessToken: string) {
+async function checkOrderStatus(orderId: number, storeHash: string, accessToken: string) {
   try {
     const orderResponse = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v2/orders/${orderId}`, {
       method: 'GET',
@@ -42,64 +51,69 @@ async function checkIfNewOrder(orderId: number, storeHash: string, accessToken: 
     if (!orderResponse.ok) {
       console.warn('[Order Webhook] Could not fetch order details, assuming new order');
       
-return true; // Default to treating as new order if we can't check
+      return { isNewOrder: true, statusId: null, status: null };
     }
 
     const orderData = await orderResponse.json();
     const dateCreated = orderData.date_created;
     const dateModified = orderData.date_modified;
+    const statusId = orderData.status_id;
+    const status = orderData.status;
     
-    // If date_created and date_modified are identical, it's a new order
-    // If they're different, the order was modified after creation
-    const isNewOrder = dateCreated === dateModified;
+    // Parse timestamps to calculate difference
+    const createdTime = new Date(dateCreated).getTime();
+    const modifiedTime = new Date(dateModified).getTime();
+    const timeDifferenceSeconds = Math.abs(modifiedTime - createdTime) / 1000;
     
-    console.log(`[Order Webhook] Order ${orderId} - created: ${dateCreated}, modified: ${dateModified}, treating as ${isNewOrder ? 'new order' : 'edit'}`);
+    // Consider it a new order if timestamps are within 10 seconds of each other
+    const isNewOrder = timeDifferenceSeconds <= 10;
     
-    return isNewOrder;
+    console.log(`[Order Webhook] Order ${orderId} - created: ${dateCreated}, modified: ${dateModified}, status: ${status} (${statusId}), difference: ${timeDifferenceSeconds}s, treating as ${isNewOrder ? 'new order' : 'edit'}`);
+    
+    return { isNewOrder, statusId, status };
   } catch (error) {
     console.warn('[Order Webhook] Error checking order timestamps, assuming new order:', error);
     
-return true; // Default to treating as new order on error
+    return { isNewOrder: true, statusId: null, status: null };
   }
 }
 
 // Calculate deltas between original and current order items for order updates
-async function calculateOrderDeltas(orderId: number, currentItems: any[]) {
+async function calculateOrderUpdateDeltas(orderId: number, currentItems: any[], storeHash: string) {
   console.log('[Order Webhook] Calculating order deltas for order update');
   
   try {
-    // For order updates, we don't need to handle individual item stock changes
-    // BigCommerce automatically handles those. We only need to:
-    // 1. Find bundles that were in the order and recalculate their stock
-    // 2. Find bundles that contain updated items and recalculate their stock
+    // Get previous order state from our storage
+    const previousItems = await getOrderHistory(orderId, storeHash);
     
-    // Return empty array since BigCommerce handles individual item stock automatically
-    // The main logic will still process bundle recalculations based on current order state
-    console.log('[Order Webhook] Order update detected - BigCommerce handles individual item stock automatically');
-    console.log('[Order Webhook] Will recalculate bundle stock based on current order state');
+    // Calculate exact deltas using order history
+    const deltas = calculateOrderDeltas(previousItems, currentItems);
     
-    // Return items with zero quantity change since BigCommerce already handled the stock
-    // This ensures we only trigger bundle recalculations, not individual stock deductions
-    const deltaItems = currentItems.map(item => ({
-      ...item,
-      quantity: 0, // Zero delta - BigCommerce already handled the stock change
-      originalQuantity: item.quantity, // Keep original for bundle calculations
-      isOrderUpdate: true // Flag to indicate this is from an order update
+    // Convert deltas to items for processing, but only for bundle-related changes
+    const deltaItems = deltas.map(delta => ({
+      product_id: delta.product_id,
+      variant_id: delta.variant_id,
+      name: delta.name,
+      quantity: delta.quantityDelta, // The actual change in quantity
+      originalQuantity: delta.newQuantity, // Current quantity for bundle calculations
+      isOrderUpdate: true,
+      changeType: delta.changeType
     }));
     
-    console.log(`[Order Webhook] Prepared ${deltaItems.length} items for bundle recalculation (no stock deductions)`);
+    console.log(`[Order Webhook] Prepared ${deltaItems.length} order deltas for processing`);
     
     return deltaItems;
     
   } catch (error) {
     console.error('[Order Webhook] Error calculating order deltas:', error);
     
-    // Fallback: return items with zero quantities to avoid double stock deduction
+    // Fallback: use simplified approach - recalculate bundles only
     return currentItems.map(item => ({
       ...item,
-      quantity: 0,
+      quantity: 0, // Zero delta to avoid double deduction
       originalQuantity: item.quantity,
-      isOrderUpdate: true
+      isOrderUpdate: true,
+      changeType: 'unchanged'
     }));
   }
 }
@@ -118,12 +132,27 @@ return res.status(200).json({ message: 'Skipped app-generated update' });
 
     const order = req.body.data;
     const scope = req.body.scope;
+    const timestamp = req.body.created_at || Math.floor(Date.now() / 1000);
     // Extract store hash from producer field (format: "stores/7wt5mizwwn")
     const storeHash = req.body.producer?.split('/')[1];
 
     if (!order || !storeHash) {
       return res.status(400).json({ message: 'Missing required information' });
     }
+
+    const orderId = order.id;
+
+    // Check for duplicate webhook before any processing (atomically registers if new)
+    const { isDuplicate, webhookId } = await checkWebhookDuplicate(orderId, storeHash, timestamp, scope);
+    
+    if (isDuplicate) {
+      console.log(`[Order Webhook] Duplicate webhook detected for order ${orderId}, skipping processing`);
+      
+return res.status(200).json({ message: 'Duplicate webhook ignored', webhookId });
+    }
+    
+    // Webhook is now registered atomically - safe to process
+    console.log(`[Order Webhook] Processing webhook ${webhookId} for order ${orderId}`);
 
     // Get the access token for this store from the database
     const accessToken = await db.getStoreToken(storeHash);
@@ -133,9 +162,6 @@ return res.status(200).json({ message: 'Skipped app-generated update' });
     }
 
     const bc = bigcommerceClient(accessToken, storeHash);
-    const orderId = order.id;
-
-    console.log(`[Order Webhook] Received ${scope} for order ${orderId}`);
 
     // Only process store/order/updated events (handles both new orders and edits)
     if (scope !== 'store/order/updated') {
@@ -145,7 +171,7 @@ return res.status(200).json({ message: 'Webhook scope not handled' });
     }
 
     // Check if this is a new order or an edit by comparing timestamps
-    const isNewOrder = await checkIfNewOrder(orderId, storeHash, accessToken);
+    const { isNewOrder, statusId, status } = await checkOrderStatus(orderId, storeHash, accessToken);
     console.log(`[Order Webhook] Processing ${isNewOrder ? 'new order' : 'order update'}: ${orderId}`);
 
     // Fetch order products using V2 API manually
@@ -164,16 +190,86 @@ return res.status(200).json({ message: 'Webhook scope not handled' });
 
     const currentOrderItems = await orderProductsRes.json();
 
+    // Check if this is a canceled, refunded, or partially refunded order
+    const isCanceled = statusId === 5; // Cancelled
+    const isRefunded = statusId === 4; // Refunded
+    const isPartiallyRefunded = statusId === 14; // Partially Refunded
+    const shouldRestoreInventory = isCanceled || isRefunded;
+
     // Handle new orders vs order updates differently
     let itemsToProcess = currentOrderItems;
     
     if (isNewOrder) {
       // For new orders, process all items as-is (no deltas needed)
       console.log('[Order Webhook] Processing new order - using full order data');
+      
+      // Store order history for future comparisons
+      await storeOrderHistory(orderId, storeHash, currentOrderItems);
+    } else if (shouldRestoreInventory) {
+      // For canceled/refunded orders, restore all inventory by inverting quantities
+      console.log(`[Order Webhook] Order ${orderId} is ${status} - restoring full inventory`);
+      
+      // Get the original order items from history
+      const previousItems = await getOrderHistory(orderId, storeHash);
+      
+      if (previousItems && previousItems.length > 0) {
+        // Invert the quantities to restore inventory
+        itemsToProcess = previousItems.map(item => ({
+          product_id: item.product_id,
+          variant_id: item.variant_id,
+          name: item.name,
+          quantity: -item.quantity, // Negative to restore
+          originalQuantity: 0, // Current quantity is effectively 0
+          isOrderUpdate: true,
+          changeType: 'cancelled'
+        }));
+        console.log(`[Order Webhook] Will restore inventory for ${itemsToProcess.length} items from canceled/refunded order`);
+      } else {
+        console.warn(`[Order Webhook] No order history found for ${status} order ${orderId}, cannot restore inventory`);
+        itemsToProcess = [];
+      }
+      
+      // Update history to mark as processed
+      await storeOrderHistory(orderId, storeHash, currentOrderItems);
+    } else if (isPartiallyRefunded) {
+      // For partially refunded orders, restore inventory based on quantity_refunded field
+      console.log(`[Order Webhook] Order ${orderId} is ${status} - processing partial refund`);
+      
+      // Process items with quantity_refunded > 0
+      itemsToProcess = currentOrderItems
+        .filter(item => item.quantity_refunded && item.quantity_refunded > 0)
+        .map(item => ({
+          product_id: item.product_id,
+          variant_id: item.variant_id,
+          name: item.name,
+          quantity: -item.quantity_refunded, // Negative to restore refunded quantity
+          originalQuantity: item.quantity - item.quantity_refunded, // Remaining valid quantity
+          isOrderUpdate: true,
+          changeType: 'partial_refund'
+        }));
+      
+      console.log(`[Order Webhook] Will restore inventory for ${itemsToProcess.length} partially refunded items`);
+      itemsToProcess.forEach(item => {
+        console.log(`  - ${item.name}: restoring ${Math.abs(item.quantity)} units (${item.originalQuantity} remaining)`);
+      });
+      
+      // Store adjusted quantities (net remaining after refund) in history
+      // This ensures future cancellations only restore the remaining quantity
+      const adjustedItems = currentOrderItems.map(item => ({
+        ...item,
+        quantity: item.quantity - (item.quantity_refunded || 0), // Store NET quantity
+        // Keep quantity_refunded for reference
+      }));
+      
+      console.log(`[Order Webhook] Storing adjusted order history with net quantities`);
+      await storeOrderHistory(orderId, storeHash, adjustedItems);
     } else {
-      // For order updates, calculate deltas to handle edits properly
+      // For regular order updates, calculate deltas to handle edits properly
       console.log('[Order Webhook] Processing order update - calculating deltas');
-      itemsToProcess = await calculateOrderDeltas(orderId, currentOrderItems);
+      itemsToProcess = await calculateOrderUpdateDeltas(orderId, currentOrderItems, storeHash);
+      
+      // Update stored order history with current state
+      await storeOrderHistory(orderId, storeHash, currentOrderItems);
     }
 
     console.log(`[Order Webhook] Processing order ${orderId} with ${itemsToProcess.length} items`);
@@ -187,9 +283,9 @@ return res.status(200).json({ message: 'Webhook scope not handled' });
       const bundleCategory = categories.find((c: any) => String(c?.name || '').toLowerCase() === 'bundle');
       
       if (bundleCategory) {
-        console.log(`[Order Webhook] Found bundle category: ${bundleCategory.id}`);
+        //console.log(`[Order Webhook] Found bundle category: ${bundleCategory.id}`);
         const { data: bundleCategoryProducts } = await bc.get(`/catalog/products?categories:in=${bundleCategory.id}`);
-        console.log(`[Order Webhook] Found ${bundleCategoryProducts.length} products in bundle category`);
+        //console.log(`[Order Webhook] Found ${bundleCategoryProducts.length} products in bundle category`);
         
         // Only check metafields for products in bundle category
         for (const product of bundleCategoryProducts) {
@@ -201,7 +297,7 @@ return res.status(200).json({ message: 'Webhook scope not handled' });
           id: product.id,
           linkedProductIds: productLinkedProductIds
         });
-            console.log(`[Order Webhook] Found product bundle: ${product.id}`);
+            //console.log(`[Order Webhook] Found product bundle: ${product.id}`);
       }
 
       // Check variant-level metafields
@@ -220,7 +316,7 @@ return res.status(200).json({ message: 'Webhook scope not handled' });
           }
         }
       } else {
-        console.log(`[Order Webhook] No bundle category found, will check ordered items individually`);
+        //console.log(`[Order Webhook] No bundle category found, will check ordered items individually`);
       }
     } catch (error) {
       console.warn(`[Order Webhook] Could not fetch bundle category, falling back to individual checks:`, error);
@@ -239,9 +335,10 @@ return res.status(200).json({ message: 'Webhook scope not handled' });
       
       console.log(`[Order Webhook] Processing item: Product ${productId}${variantId ? ` Variant ${variantId}` : ''} x${orderedQuantity}${isOrderUpdate ? ' (order update)' : ''}`);
       
-      // For order updates, skip individual stock deductions - BigCommerce handles these automatically
+      // For order updates with zero delta, skip processing (no change)
       if (isOrderUpdate && orderedQuantity === 0) {
-        console.log(`[Order Webhook] Skipping stock deduction for order update - BigCommerce handles automatically`);
+        console.log(`[Order Webhook] Skipping item with no quantity change`);
+        continue;
       }
       
       // Check if this ordered item is a known bundle
@@ -254,10 +351,9 @@ return res.status(200).json({ message: 'Webhook scope not handled' });
           console.log(`[Order Webhook] Ordered item is a variant bundle: ${productId}:${variantId}`);
           isItemABundle = true;
           
-          // Only deduct stock from bundle components for new orders
-          // For order updates, BigCommerce handles the stock changes automatically
-          if (!isOrderUpdate && orderedQuantity > 0) {
-            // Deduct stock from each component in the bundle
+          // For new orders, deduct full quantity. For updates, deduct/restore based on delta
+          if (orderedQuantity !== 0) {
+            // Adjust stock for each component in the bundle based on quantity delta
             for (const linkedProduct of variantBundle.linkedProductIds) {
               const { productId: targetProductId, variantId: targetVariantId, quantity } = parseLinkedProduct(linkedProduct);
               const totalQuantity = orderedQuantity * quantity;
@@ -272,10 +368,8 @@ return res.status(200).json({ message: 'Webhook scope not handled' });
                 newLevel: newDeduction
               });
               
-              console.log(`[Order Webhook] Will deduct ${totalQuantity} from ${key}`);
+              console.log(`[Order Webhook] Will ${orderedQuantity > 0 ? 'deduct' : 'restore'} ${Math.abs(totalQuantity)} ${orderedQuantity > 0 ? 'from' : 'to'} ${key}`);
             }
-          } else if (isOrderUpdate) {
-            console.log(`[Order Webhook] Skipping bundle component deduction for order update - BigCommerce handles automatically`);
           }
         }
       }
@@ -287,10 +381,9 @@ return res.status(200).json({ message: 'Webhook scope not handled' });
           console.log(`[Order Webhook] Ordered item is a product bundle: ${productId}`);
           isItemABundle = true;
           
-          // Only deduct stock from bundle components for new orders
-          // For order updates, BigCommerce handles the stock changes automatically
-          if (!isOrderUpdate && orderedQuantity > 0) {
-            // Deduct stock from each component in the bundle
+          // For new orders, deduct full quantity. For updates, deduct/restore based on delta
+          if (orderedQuantity !== 0) {
+            // Adjust stock for each component in the bundle based on quantity delta
             for (const linkedProduct of productBundle.linkedProductIds) {
                 const { productId: targetProductId, variantId: targetVariantId, quantity } = parseLinkedProduct(linkedProduct);
                 const totalQuantity = orderedQuantity * quantity;
@@ -305,10 +398,8 @@ return res.status(200).json({ message: 'Webhook scope not handled' });
                 newLevel: newDeduction
               });
               
-              console.log(`[Order Webhook] Will deduct ${totalQuantity} from ${key}`);
+              console.log(`[Order Webhook] Will ${orderedQuantity > 0 ? 'deduct' : 'restore'} ${Math.abs(totalQuantity)} ${orderedQuantity > 0 ? 'from' : 'to'} ${key}`);
             }
-          } else if (isOrderUpdate) {
-            console.log(`[Order Webhook] Skipping bundle component deduction for order update - BigCommerce handles automatically`);
           }
         }
       }
@@ -366,6 +457,7 @@ return targetProductId === productId && (!variantId || targetVariantId === varia
       try {
         if (update.variantId) {
           const { data: variant } = await bc.get(`/catalog/products/${update.productId}/variants/${update.variantId}`);
+          // For positive deltas: subtract from stock. For negative deltas: add to stock
           const newStock = Math.max(0, variant.inventory_level - update.newLevel);
           
           const response = await fetch(`https://api.bigcommerce.com/stores/${storeHash}/v3/catalog/products/${update.productId}/variants/${update.variantId}`, {
@@ -411,7 +503,12 @@ return targetProductId === productId && (!variantId || targetVariantId === varia
     // Recalculate affected bundles using shared utility
     await recalculateBundlesFromKeys(bundleRecalculations, bundleProducts, bundleVariants, bc, storeHash, accessToken);
 
-    res.status(200).json({ message: 'Stock levels updated successfully' });
+    // Cleanup old webhook records periodically (1% chance per webhook)
+    if (Math.random() < 0.01) {
+      cleanupExpiredWebhooks(); // Don't await - run in background
+    }
+
+    res.status(200).json({ message: 'Stock levels updated successfully', webhookId });
   } catch (err: any) {
     res.status(500).json({ message: 'Internal Server Error', error: err.message });
   }

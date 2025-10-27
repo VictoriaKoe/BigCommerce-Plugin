@@ -3,11 +3,11 @@ import 'dotenv/config';
 import axios from 'axios';
 
 async function fetchOrders() {
-  const storeHash = 'mr060sppq6';
+  const storeHash = '7wt5mizwwn';
   
   // You'll need to provide the access token for this specific store
   // This should be retrieved from your database or environment variables
-  const accessToken = process.env.ACCESS_TOKEN_MR060SPPQ6;
+  const accessToken = 'eg689reagabbe3yql32w16jqxnpzvi2';
 
   if (!accessToken) {
     console.error('❌ Please set ACCESS_TOKEN_MR060SPPQ6 in your .env file');
@@ -95,8 +95,8 @@ async function fetchOrders() {
 
 // Also create a function to fetch a specific order and its products
 async function fetchOrderDetails(orderId) {
-  const storeHash = 'mr060sppq6';
-  const accessToken = process.env.ACCESS_TOKEN_MR060SPPQ6;
+  const storeHash = '7wt5mizwwn';
+  const accessToken = 'eg689reagabbe3yql32w16jqxnpzvi2';
 
   if (!accessToken) {
     console.error('❌ Please set ACCESS_TOKEN_MR060SPPQ6 in your .env file');

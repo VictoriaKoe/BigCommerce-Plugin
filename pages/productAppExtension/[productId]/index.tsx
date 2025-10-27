@@ -4,7 +4,7 @@ import BundleSettingsPanel from '@components/BundleSettingsPanel';
 import ErrorMessage from '@components/error';
 import Loading from '@components/loading';
 import { alertsManager } from '@lib/alerts';
-import { useProductInfo, useProductList } from '@lib/hooks';
+import { useAllProducts, useProductInfo} from '@lib/hooks';
 
 interface Variant {
   id: number;
@@ -29,7 +29,7 @@ const ProductAppExtension = () => {
   const [isBundle, setIsBundle] = useState(false);
   const [linkedProducts, setLinkedProducts] = useState([]);
   const [productQuantities, setProductQuantities] = useState<Record<string, number>>({});
-  const { list = [], isLoading: isProductsLoading, error: productsError } = useProductList();
+  const { list = [], isLoading: isProductsLoading, error: productsError } = useAllProducts();
   const [saving, setSaving] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const [selectedVariant, setSelectedVariant] = useState<Variant | null>(null);
