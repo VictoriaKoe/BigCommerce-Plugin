@@ -39,7 +39,7 @@ test.describe('BigCommerce Bundle Management', () => {
   .first()
   .click();
   // Step 4: Open Product Bundle Manager
-  await page.locator('iframe[name="cp-iframe"]').contentFrame().getByRole('option', { name: 'Product Bundle Manager' }).nth(1).click();
+  await page.locator('iframe[name="cp-iframe"]').contentFrame().getByRole('option', { name: 'Product Bundle Manager' }).first().click();
   
   // Verify bundle manager opened
   const bundleFrame = page.locator('iframe[title="Product Bundle Manager"]');
@@ -47,6 +47,7 @@ test.describe('BigCommerce Bundle Management', () => {
   
   // Step 5: Configure bundle settings
   await bundleFrame.contentFrame().locator('label').click();
+  await page.waitForTimeout(5000);
   // Step 6: Add first bundle item (Red variant)
   await bundleFrame.contentFrame().getByRole('button', { name: 'Red [E2EDND001-RE]' }).click();
   await bundleFrame.contentFrame().locator('.css-1xc3v61-indicatorContainer').click();
@@ -82,8 +83,6 @@ test.describe('BigCommerce Bundle Management', () => {
   await page.goto('https://store-7wt5mizwwn.mybigcommerce.com/manage/products');
   await expect(page).toHaveURL(/products/);
   
-  await page.locator('iframe[name="cp-iframe"]').contentFrame().locator('.styled__StyledButton-sc-3yq204-0.fbfJhz.sc-kNnbXp').first().click();
-  
   // Step 10: Edit the product to remove bundle
   await page.waitForTimeout(10000); 
   await page.locator('iframe[name="cp-iframe"]').contentFrame()
@@ -103,8 +102,9 @@ test.describe('BigCommerce Bundle Management', () => {
   .locator('button')
   .first()
   .click();
-  await page.locator('iframe[name="cp-iframe"]').contentFrame().getByText('Product Bundle Manager').nth(1).click();
+  await page.locator('iframe[name="cp-iframe"]').contentFrame().getByRole('option', { name: 'Product Bundle Manager' }).first().click();
   await page.locator('iframe[title="Product Bundle Manager"]').contentFrame().locator('label').click();
+  await page.waitForTimeout(5000);
   // Step 11: Remove bundle configuration
   await bundleFrame.contentFrame().getByRole('button', { name: 'Remove bundle status' }).click();
   
@@ -116,9 +116,30 @@ test.describe('BigCommerce Bundle Management', () => {
   await page.goto('https://store-7wt5mizwwn.mybigcommerce.com/manage/products');
   await expect(page).toHaveURL(/products/);
   
-  // Verify the product is back to normal state
-  await page.locator('iframe[name="cp-iframe"]').contentFrame().locator('.styled__StyledButton-sc-3yq204-0.fbfJhz.sc-kNnbXp').first().click();
-  
   console.log('✅ Bundle management test completed successfully!');
+
+  // Step 14: Create a discount
+  await page.getByRole('menuitem', { name: 'Expand Inactive apps icon Apps' }).getByLabel('Expand').click();
+  await page.getByRole('link', { name: 'BundleSync Logo BundleSync' }).click();
+  await page.locator('iframe[title="App iframe"]').contentFrame().getByRole('button', { name: 'Go to Discounts' }).click();
+  await page.locator('iframe[title="App iframe"]').contentFrame().getByRole('button', { name: 'toggle menu' }).click();
+  await page.locator('iframe[title="App iframe"]').contentFrame().getByRole('textbox', { name: 'Discount Name (optional)' }).click();
+  await page.locator('iframe[title="App iframe"]').contentFrame().getByRole('textbox', { name: 'Discount Name (optional)' }).fill('Chess Pieces - 559');
+  await page.locator('iframe[title="App iframe"]').contentFrame().getByRole('textbox', { name: 'Discount Name (optional)' }).click();
+  await page.locator('iframe[title="App iframe"]').contentFrame().getByRole('option', { name: 'Chess Pieces' }).locator('svg').click();
+  await page.locator('iframe[title="App iframe"]').contentFrame().getByRole('button', { name: 'Percentage (%)' }).click();
+  await page.locator('iframe[title="App iframe"]').contentFrame().getByRole('spinbutton', { name: 'Discount Amount' }).click();
+  await page.locator('iframe[title="App iframe"]').contentFrame().getByRole('spinbutton', { name: 'Discount Amount' }).fill('10');
+  await page.locator('iframe[title="App iframe"]').contentFrame().getByRole('button', { name: 'Create Discount' }).click();
+  await page.waitForTimeout(10000);
+  console.log('✅ Discount created successfully!');
+
+  // Step 15: Delete the discount
+  await page.locator('iframe[title="App iframe"]').contentFrame().getByRole('row', { name: 'Chess Pieces - 559 Chess' }).getByRole('button').click();
+  await page.locator('iframe[title="App iframe"]').contentFrame().getByRole('option', { name: 'Delete' }).click();
+  await page.waitForTimeout(5000);
+  console.log('✅ Discount deleted successfully!');
+
+  console.log('✅ Discount management test completed successfully!');
   });
 });

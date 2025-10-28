@@ -12,12 +12,12 @@ Playwright is a modern end-to-end testing framework that supports multiple brows
 e2e-tests/
 ├── README.md                 # This file
 ├── env.example              # Environment variables template
-└── navigation.spec.ts       # Admin bundle management test
+└── bundle-management.spec.ts       # Admin bundle management test
 ```
 
 ## Test Scenarios
 
-### Admin Bundle Management Test (`navigation.spec.ts`)
+### Admin Bundle Management Test (`bundle-management.spec.ts`)
 Tests the complete workflow for an admin to manage product bundles:
 - Login to BigCommerce admin
 - Navigate to Products
