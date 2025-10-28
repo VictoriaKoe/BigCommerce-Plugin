@@ -7,7 +7,7 @@
 # **BigCommerce Plugin for ChessWorld SKU Management**
 
      **Existing Solutions Review **	  
-Version 2.0
+Version 4.0
 
 **Written by:**  
 Rui En Koe  

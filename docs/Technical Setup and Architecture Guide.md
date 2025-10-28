@@ -7,7 +7,7 @@
 **Technical Setup and**  
 **Architecture Guide**
 
-Version 3.0
+Version 4.0
 
 **Written by:**  
 Rui En Koe  
